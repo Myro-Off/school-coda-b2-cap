@@ -83,3 +83,10 @@ Vous pouvez importer `openapi.yaml` dans Bruno pour générer votre collection :
 requêtes viennent de votre propre contrat.
 
 N'écrivez pas les douze opérations avant de tester la première.
+
+## Déclaration d'utilisation de l'IA
+
+Conformément aux consignes, j'ai utilisé une IA comme assistant pour :
+- **Mieux comprendre certaines règles** : fonctionnement d'OpenAPI (notamment `allOf`) et les conventions de retour d'une API.
+- **Vérification et complétion** : je l'ai utilisée pour relire mon contrat et vérifier que je n'avais oublié de traiter aucune règle ou cas particulier du contrat métier, afin de viser la note maximale.
+- **Finaliser la rédaction** : par manque de temps sur la fin, pour formater les dernières routes en YAML en m'inspirant strictement des descriptions du cahier des charges.

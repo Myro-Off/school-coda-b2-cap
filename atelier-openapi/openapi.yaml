@@ -45,30 +45,18 @@ tags:
   - name: Authentification
     description: Création de compte et obtention des jetons. Public.
   - name: Compte
-    description: Profil du voyageur et billets détenus.
+    description: Profil du voyageur.
   - name: Découverte
     description: Villes desservies et recherche de lancers. Public.
   - name: Panier
     description: Composition et paiement d'une réservation.
+  - name: Billets
+    description: Consultation des titres de transport émis.
 
-# Sécurité par défaut : tout est protégé. Les opérations publiques
-# lèvent explicitement cette contrainte avec `security: []`.
 security:
   - bearerAuth: []
 
 paths:
-  # ==========================================================================
-  #  FOURNI — Authentification et profil
-  #
-  #  Ces quatre opérations sont écrites. Elles ne sont pas là pour être
-  #  recopiées, mais pour servir de référence : tout ce dont vous avez besoin
-  #  pour écrire le reste s'y trouve déjà au moins une fois.
-  #
-  #  Allez y chercher : comment on déclare un body, comment on référence un
-  #  schéma, comment on ouvre une opération au public, comment on décrit une
-  #  réponse d'erreur, comment on documente un paramètre.
-  # ==========================================================================
-
   /auth/register:
     post:
       tags: [Authentification]
@@ -203,82 +191,311 @@ paths:
                 $ref: '#/components/schemas/User'
         '401': { $ref: '#/components/responses/Unauthorized' }
 
-  # ==========================================================================
-  #  À VOUS — Le flux de réservation
-  #
-  #  Tout ce qui suit est à écrire. Le contrat métier distribué en fin de J2
-  #  fait foi : c'est lui qui dit quelles opérations existent, ce qu'elles
-  #  reçoivent et ce qu'elles renvoient. Les indications ci-dessous ne sont
-  #  que des repères — elles ne remplacent pas le contrat métier.
-  #
-  #  Deux choses à ne pas perdre de vue :
-  #    - Le mock tourne déjà (`docker compose up`). Écrivez une opération,
-  #      rejouez-la dans Bruno, voyez ce qui sort. N'attendez pas la fin.
-  #    - `spectral lint openapi.yaml` doit rester vert. Si le linter râle,
-  #      corrigez tout de suite : une erreur en cache trois.
-  # ==========================================================================
+  /cities:
+    get:
+      tags: [ Découverte ]
+      operationId: listCities
+      summary: Rechercher une ville
+      description: |
+        Rechercher une ville desservie, par filtre textuel.
+        Chaque ville du réseau possède une catapulte unique en son centre.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Filtre textuel sur le nom de la ville. Insensible à la casse et aux accents.
+          schema:
+            type: string
+          example: dij
+        - name: limit
+          in: query
+          required: false
+          description: Nombre maximum de villes retournées.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Villes correspondant au filtre. Tableau vide si aucune.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/City'
+              example:
+                - id: 3f2a1b8c-5d4e-4f6a-9b8c-1d2e3f4a5b6c
+                  name: Dijon
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  # ---- Découverte (public) -------------------------------------------------
+  /trips/search:
+    post:
+      tags: [ Découverte ]
+      operationId: searchTrips
+      summary: Rechercher un lancer
+      description: |
+        Rechercher les lancers reliant deux villes à une date donnée, pour un
+        nombre de places. Tous les lancers sont directs : aucune correspondance.
+        Sans lancer direct ce jour-là, la liste est vide.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ departure, arrival, date, passengers ]
+              properties:
+                departure:
+                  type: string
+                  description: Nom de la ville de départ.
+                  example: "Paris"
+                arrival:
+                  type: string
+                  description: Nom de la ville d'arrivée.
+                  example: "Marseille"
+                date:
+                  type: string
+                  format: date
+                  description: Date de départ souhaitée (ISO 8601).
+                  example: "2026-03-17"
+                passengers:
+                  type: integer
+                  minimum: 1
+                  maximum: 15
+                  description: Nombre de places à réserver (les catapultes ont une limite stricte).
+                  example: 2
+      responses:
+        '200':
+          description: Liste des lancers correspondants aux critères.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TripSummary'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  # GET /cities
-  #   Rechercher une ville desservie, par filtre textuel.
-  #   Chaque ville du réseau possède une catapulte unique en son centre.
-  #   Opération PUBLIQUE : on cherche sans être connecté.
+  /trips/{id}:
+    get:
+      tags: [ Découverte ]
+      operationId: getTripDetail
+      summary: Consulter le détail d'un lancer
+      description: |
+        Consulter le détail d'un lancer. Le détail porte ce qu'une liste de
+        résultats n'a aucune raison de transporter pour chacune de ses lignes.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identifiant unique du lancer.
+          schema:
+            type: string
+            format: uuid
+            example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Le détail complet du lancer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripDetail'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  # POST /trips/search
-  #   Rechercher les lancers reliant deux villes à une date donnée, pour un
-  #   nombre de places. Tous les lancers sont directs : aucune correspondance,
-  #   aucun itinéraire composé. Sans lancer direct ce jour-là, la liste est vide.
-  #   Opération PUBLIQUE.
+  /carts:
+    post:
+      tags: [ Panier ]
+      operationId: createCart
+      summary: Ouvrir un panier vide
+      description: |
+        Ouvrir un panier vide. C'est ici que la connexion devient nécessaire :
+        la découverte est libre, la réservation est nominative.
+      responses:
+        '201':
+          description: Le panier vide vient d'être créé.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
-  # GET /trips/{id}
-  #   Consulter le détail d'un lancer. Le détail porte ce qu'une liste de
-  #   résultats n'a aucune raison de transporter pour chacune de ses lignes.
-  #   Opération PUBLIQUE.
+    get:
+      tags: [ Panier ]
+      operationId: getMyCart
+      summary: Récupérer son panier actif
+      description: |
+        Récupérer le panier actif du voyageur connecté. Un voyageur n'a qu'un
+        panier actif à la fois — et parfois aucun, ce qui est un état normal.
+      responses:
+        '200':
+          description: Renvoie un tableau contenant le panier actif, ou `[]` s'il n'y en a pas.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cart'
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
-  # ---- Panier (authentifié) ------------------------------------------------
+  /carts/{id}/items:
+    post:
+      tags: [ Panier ]
+      operationId: addCartItem
+      summary: Ajouter un lancer au panier
+      description: |
+        Ajouter un lancer au panier, avec un nombre de places.
+        L'écran de panier doit pouvoir se peindre à partir de cette seule
+        réponse. Le total est calculé par le serveur.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identifiant du panier.
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ tripId, passengers ]
+              properties:
+                tripId:
+                  type: string
+                  format: uuid
+                  description: L'identifiant du lancer à ajouter.
+                passengers:
+                  type: integer
+                  minimum: 1
+                  maximum: 15
+                  description: Le nombre de places souhaitées. Doit être positif.
+      responses:
+        '200':
+          description: Le panier mis à jour, avec la nouvelle ligne et le nouveau total.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  # POST /carts
-  #   Ouvrir un panier vide. C'est ici que la connexion devient nécessaire :
-  #   la découverte est libre, la réservation est nominative.
+  /carts/{id}/items/{itemId}:
+    delete:
+      tags: [ Panier ]
+      operationId: deleteCartItem
+      summary: Retirer une ligne du panier
+      description: |
+        Retirer une ligne du panier. Si c'était la dernière, le panier disparaît
+        côté serveur — le voyageur n'a rien à faire de plus.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identifiant du panier.
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+        - name: itemId
+          in: path
+          required: true
+          description: Identifiant de la ligne de réservation à supprimer.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Le panier recalculé (ou `[]` si le panier a été supprimé suite au retrait).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cart'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  # GET /carts
-  #   Récupérer le panier actif du voyageur connecté. Un voyageur n'a qu'un
-  #   panier actif à la fois — et parfois aucun, ce qui est un état normal
-  #   et non une erreur. Réfléchissez à ce que ça implique pour la réponse.
+  /carts/{id}/pay:
+    post:
+      tags: [ Panier ]
+      operationId: payCart
+      summary: Régler le panier
+      description: |
+        Payer le panier : il passe de `pending` à `paid` et les billets sont
+        émis, un par place réservée. Aucune donnée bancaire ne circule : on
+        déclare un moyen de paiement, rien de plus.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identifiant du panier à payer.
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayRequest'
+      responses:
+        '200':
+          description: Paiement accepté, le panier est réglé et les billets sont émis.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': 
+          description: Ce panier a déjà été réglé.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422': { $ref: '#/components/responses/ValidationError' }
 
-  # POST /carts/{id}/items
-  #   Ajouter un lancer au panier, avec un nombre de places.
-  #   L'écran de panier doit pouvoir se peindre à partir de cette seule
-  #   réponse, sans second appel. Le total est calculé par le serveur.
-
-  # DELETE /carts/{id}/items/{itemId}
-  #   Retirer une ligne du panier. Si c'était la dernière, le panier disparaît
-  #   côté serveur — le voyageur n'a rien à faire de plus.
-
-  # POST /carts/{id}/pay
-  #   Payer le panier : il passe de `pending` à `paid` et les billets sont
-  #   émis, un par place réservée. Aucune donnée bancaire ne circule : on
-  #   déclare un moyen de paiement, rien de plus.
-  #   L'écran de confirmation doit pouvoir se peindre à partir de cette seule
-  #   réponse. Que se passe-t-il si le panier est déjà payé ?
-
-  # ---- Billets (authentifié) -----------------------------------------------
-
-  # GET /tickets
-  #   Lister les billets du voyageur connecté. Un billet est un droit à
-  #   embarquer sur un lancer : il n'est pas nominatif, il vaut pour une
-  #   place et non pour une personne désignée.
+  /tickets:
+    get:
+      tags: [ Billets ]
+      operationId: getMyTickets
+      summary: Lister ses billets
+      description: |
+        Lister les billets du voyageur connecté. Un billet est un droit à
+        embarquer sur un lancer : il n'est pas nominatif, il vaut pour une
+        place et non pour une personne désignée.
+      responses:
+        '200':
+          description: Liste des billets émis (vide `[]` si aucun achat).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Ticket'
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
 components:
-  # ==========================================================================
-  #  FOURNI — Sécurité, erreurs, et schémas de l'authentification
-  #
-  #  Le schéma de sécurité et le format d'erreur sont posés : ils valent pour
-  #  toute l'API, y compris pour les opérations que vous allez écrire.
-  #  Servez-vous en (`$ref`), ne les redéfinissez pas.
-  # ==========================================================================
-
   securitySchemes:
     bearerAuth:
       type: http
@@ -291,7 +508,7 @@ components:
 
   responses:
     BadRequest:
-      description: Corps de requête illisible (JSON malformé).
+      description: Corps de requête illisible (JSON malformé) ou paramètres invalides.
       content:
         application/problem+json:
           schema:
@@ -340,8 +557,8 @@ components:
 
     ValidationError:
       description: |
-        Le corps est syntaxiquement valide mais une ou plusieurs valeurs sont refusées.
-        À distinguer du `400`, qui signale un JSON illisible.
+        Le corps ou la requête est syntaxiquement valide mais une ou plusieurs valeurs sont refusées.
+        À distinguer du `400`.
       content:
         application/problem+json:
           schema:
@@ -356,7 +573,6 @@ components:
                 message: Le nombre de places doit être supérieur ou égal à 1.
 
   schemas:
-    # ------------------------------------------------------------ Erreurs (RFC 7807)
     Problem:
       type: object
       description: |
@@ -403,7 +619,6 @@ components:
                     type: string
                     description: Raison du rejet, lisible par un humain.
 
-    # ------------------------------------------------------------ Auth
     RegisterRequest:
       type: object
       required: [email, password]
@@ -479,37 +694,152 @@ components:
           format: date-time
           example: '2027-02-14T10:03:00Z'
 
-    # ==========================================================================
-    #  À VOUS — Les schémas du flux de réservation
-    #
-    #  Les entités ci-dessous sont à définir. On vous donne ce qu'elles sont,
-    #  pas ce qu'elles contiennent : le contrat métier de J2 porte les champs,
-    #  à vous de les traduire en schémas.
-    #
-    #  Quelques questions qui valent d'être posées avant d'écrire :
-    #    - Qu'est-ce qui est obligatoire, qu'est-ce qui est facultatif ?
-    #    - Deux schémas se ressemblent-ils au point que l'un compose l'autre ?
-    #    - Une valeur n'a-t-elle qu'un jeu de possibilités connu d'avance ?
-    # ==========================================================================
+    City:
+      type: object
+      description: Une ville desservie par le réseau.
+      required: [ id, name ]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "3f2a1b8c-5d4e-4f6a-9b8c-1d2e3f4a5b6c"
+        name:
+          type: string
+          example: "Dijon"
 
-    # City
-    #   Une ville desservie. Chaque ville possède une catapulte unique en son
-    #   centre, qui sert à la fois de point de lancement et de réception.
+    TripSummary:
+      type: object
+      description: Un lancer dans une liste de résultats de recherche.
+      required: [ id, departure, arrival, launchTime, duration, price ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        departure:
+          type: string
+          example: "Paris"
+        arrival:
+          type: string
+          example: "Marseille"
+        launchTime:
+          type: string
+          format: date-time
+          example: "2026-03-17T11:40:00Z"
+        duration:
+          type: integer
+          description: Durée en minutes.
+          example: 42
+        price:
+          type: integer
+          description: Prix par place (en euros ronds).
+          example: 54
 
-    # TripSummary
-    #   Un lancer tel qu'il apparaît dans une liste de résultats : de quoi
-    #   choisir, pas de quoi préparer son voyage.
+    TripDetail:
+      description: Détail complet d'un lancer.
+      allOf:
+        - $ref: '#/components/schemas/TripSummary'
+        - type: object
+          required: [ massAllowance, catapultModel, boardingInstructions ]
+          properties:
+            massAllowance:
+              type: integer
+              description: Franchise de masse en kilogrammes.
+              example: 27
+            catapultModel:
+              type: string
+              description: Engin utilisé.
+              example: "Onagre M3"
+            boardingInstructions:
+              type: string
+              description: Informations pour le voyageur.
+              example: "Présentez-vous à la catapulte 20 minutes avant."
 
-    # TripDetail
-    #   Le même lancer, consulté seul. Il ajoute ce dont on a besoin une fois
-    #   qu'on l'a choisi — notamment la franchise de masse, qui n'est pas ici
-    #   une limite commerciale mais balistique.
+    Cart:
+      description: Panier de l'utilisateur.
+      type: object
+      required: [ id, status, items, total, createdAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ pending, paid ]
+          description: État du panier (en attente de paiement ou réglé).
+          example: pending
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartItem'
+        total:
+          type: integer
+          description: Prix total calculé par l'Office.
+          example: 108
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-03-17T14:30:00Z"
 
-    # Cart
-    #   Un panier de réservation. Il connaît son état, ses lignes, et son total.
+    CartItem:
+      type: object
+      description: Une ligne de réservation dans un panier.
+      required: [ id, trip, passengers, subtotal ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        trip:
+          $ref: '#/components/schemas/TripSummary'
+        passengers:
+          type: integer
+          description: Nombre de places pour ce lancer.
+          example: 2
+        subtotal:
+          type: integer
+          description: Sous-total calculé par l'Office.
+          example: 108
 
-    # CartItem
-    #   Une ligne de panier : un lancer et un nombre de places.
+    Ticket:
+      type: object
+      description: Un billet de transport émis. Non nominatif.
+      required: [ id, trip, price, issuedAt ]
+      properties:
+        id:
+          type: string
+          description: "Numéro de référence (ex: ONTB-7K2M-4831)."
+          example: "ONTB-7K2M-4831"
+        trip:
+          $ref: '#/components/schemas/TripSummary'
+        price:
+          type: integer
+          description: Prix acquitté pour ce billet.
+          example: 54
+        issuedAt:
+          type: string
+          format: date-time
+          description: Date d'émission du billet.
+          example: "2026-03-17T14:35:00Z"
 
-    # Ticket
-    #   Un droit à embarquer sur un lancer, émis au paiement. Un par place.
+    PayRequest:
+      type: object
+      description: Payload pour régler le panier.
+      required: [ method ]
+      properties:
+        method:
+          type: string
+          enum: [ card, voucher ]
+          description: Moyen de paiement déclaré.
+          example: card
+
+    PayResponse:
+      type: object
+      description: Confirmation du paiement et livraison des billets.
+      required: [ cart, tickets ]
+      properties:
+        cart:
+          $ref: '#/components/schemas/Cart'
+        tickets:
+          type: array
+          description: Liste des billets émis pour ce panier.
+          items:
+            $ref: '#/components/schemas/Ticket'
